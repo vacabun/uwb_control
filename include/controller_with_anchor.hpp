@@ -1,5 +1,5 @@
-#ifndef _CONTROLLER_HPP_
-#define _CONTROLLER_HPP_
+#ifndef _CONTROLLER_WITH_ANCHOR_HPP_
+#define _CONTROLLER_WITH_ANCHOR_HPP_
 
 class UWBController : public rclcpp::Node
 {
@@ -14,10 +14,10 @@ private:
     void performTask();
     std::string selectNextNode();
     std::vector<int> getAnchorList();
-    int64_t callServiceMeasureDistance(int anchorId);
+    double callServiceMeasureDistance(int index);
     int64_t get_time_ms();
     void handle_response(rclcpp::Client<uwb_interfaces::srv::UWBMeasure>::SharedFuture future);
-
+    void control_handle(const uwb_interfaces::msg::UWBControl msg);
     rclcpp::Publisher<uwb_interfaces::msg::UWBControl>::SharedPtr controllerPublisher_;
     rclcpp::Subscription<uwb_interfaces::msg::UWBControl>::SharedPtr controllerSubscription_;
     rclcpp::TimerBase::SharedPtr liveTimer_;
@@ -30,11 +30,11 @@ private:
     std::vector<std::string> completedNodes;
     std::vector<int> anchorList;
     std::string anchorsStr;
-
-    bool service_call_completed;
-    int64_t measureDistance;
+    std::string brigde_service_str;
     std::string id_str;
     int64_t id;
     std::string locatePublishTopic;
+    uwb_interfaces::msg::UWBData uwb_data;
+    uwb_interfaces::msg::UWBControl control_message;
 };
 #endif

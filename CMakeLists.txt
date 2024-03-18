@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.6)
 project(uwb_control)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -10,13 +10,13 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(uwb_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
-add_executable(controller
-    src/controller.cpp
+add_executable(controller_with_anchor
+    src/controller_with_anchor.cpp
 )
-target_include_directories(controller PUBLIC include/)
-ament_target_dependencies(controller rclcpp std_msgs uwb_interfaces)
+target_include_directories(controller_with_anchor PUBLIC include/)
+ament_target_dependencies(controller_with_anchor rclcpp std_msgs uwb_interfaces)
 
-install(TARGETS controller DESTINATION lib/${PROJECT_NAME})
+install(TARGETS controller_with_anchor DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

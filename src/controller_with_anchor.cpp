@@ -4,11 +4,13 @@
 #include "uwb_interfaces/msg/uwb_distance.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "uwb_interfaces/srv/uwb_measure.hpp"
-#include "controller.hpp"
+#include "controller_with_anchor.hpp"
 #include <string>
 #include <regex>
+#include <thread>
+#include <future>
 using namespace std::chrono_literals;
-int main(int argc, const char *argv[])
+int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
     rclcpp::spin(std::make_shared<UWBController>());
@@ -25,16 +27,13 @@ UWBController::UWBController() : Node("uwb_controller")
     rclcpp::SensorDataQoS qos;
     qos.keep_last(1);
 
+    client_ = this->create_client<uwb_interfaces::srv::UWBMeasure>(brigde_service_str);
     controllerPublisher_ = this->create_publisher<uwb_interfaces::msg::UWBControl>("uwb_control_topic", qos);
-    controllerSubscription_ = this->create_subscription<uwb_interfaces::msg::UWBControl>(
-        "uwb_control_topic", qos, std::bind(&UWBController::control_callback, this, std::placeholders::_1));
+    controllerSubscription_ = this->create_subscription<uwb_interfaces::msg::UWBControl>("uwb_control_topic", qos, std::bind(&UWBController::control_callback, this, std::placeholders::_1));
 
     liveTimer_ = this->create_wall_timer(1s, std::bind(&UWBController::liveTimerCallback, this));
     livePublisher_ = this->create_publisher<std_msgs::msg::String>("uwb_control_live_topic", qos);
-    liveSubscription_ = this->create_subscription<std_msgs::msg::String>(
-        "uwb_control_live_topic", qos, std::bind(&UWBController::live_callback, this, std::placeholders::_1));
-
-    client_ = this->create_client<uwb_interfaces::srv::UWBMeasure>("/uwb_control");
+    liveSubscription_ = this->create_subscription<std_msgs::msg::String>("uwb_control_live_topic", qos, std::bind(&UWBController::live_callback, this, std::placeholders::_1));
 
     locatePublisher_ = this->create_publisher<uwb_interfaces::msg::UWBData>(locatePublishTopic, qos);
 
@@ -42,18 +41,9 @@ UWBController::UWBController() : Node("uwb_controller")
 
     if (nodeName == "/uwb_controller_1")
     {
-        // 执行任务
-        performTask();
-        // 将自己加入已完成节点列表
-        completedNodes.push_back(nodeName);
-        // 选择下一个节点
-        std::string nextNode = selectNextNode();
-
-        // 发布消息
-        uwb_interfaces::msg::UWBControl message;
-        message.completed_nodes = completedNodes;
-        message.assigned_node = nextNode;
-        controllerPublisher_->publish(message);
+        uwb_interfaces::msg::UWBControl msg;
+        msg.assigned_node = nodeName;
+        control_handle(msg);
     }
 }
 
@@ -77,6 +67,12 @@ void UWBController::config()
 {
     this->declare_parameter("anchor_list", "11,12,13,14");
 
+    this->declare_parameter("brigde_service", "/x500_1/uwb_bridge");
+
+    brigde_service_str = this->get_parameter("brigde_service").as_string();
+
+    RCLCPP_INFO(this->get_logger(), "brigde_service: %s", brigde_service_str.c_str());
+
     anchorsStr = this->get_parameter("anchor_list").as_string();
 
     anchorList = getAnchorList();
@@ -89,7 +85,6 @@ void UWBController::config()
     {
         id_str = match.str(1);
         id = std::stoi(id_str);
-        
     }
     locatePublishTopic = "/uwbData/px4_" + id_str;
 
@@ -113,26 +108,29 @@ std::vector<int> UWBController::getAnchorList()
 
 void UWBController::control_callback(const uwb_interfaces::msg::UWBControl::SharedPtr msg)
 {
-
-    if (msg->assigned_node == nodeName)
+    control_handle(*msg);
+}
+void UWBController::control_handle(const uwb_interfaces::msg::UWBControl msg)
+{
+    if (msg.assigned_node == nodeName)
     {
-        // 执行任务
-        performTask();
+        RCLCPP_INFO(this->get_logger(), "Node %s is performing its task.", nodeName.c_str());
+
         // 获取已完成任务的节点列表
-        completedNodes = msg->completed_nodes;
+        completedNodes = msg.completed_nodes;
         // 将自己加入已完成节点列表
         completedNodes.push_back(nodeName);
         // 选择下一个节点
         std::string nextNode = selectNextNode();
-
-        // 发布消息
-        uwb_interfaces::msg::UWBControl message;
-        message.completed_nodes = completedNodes;
-        message.assigned_node = nextNode;
-        controllerPublisher_->publish(message);
+        // 打包消息
+        control_message.all_nodes = controllerNodesList;
+        control_message.completed_nodes = completedNodes;
+        control_message.assigned_node = nextNode;
+        RCLCPP_INFO(this->get_logger(), "Next node is %s", nextNode.c_str());
+        // 执行任务
+        performTask();
     }
 }
-
 int64_t UWBController::get_time_ms()
 {
     rclcpp::Time current_time = this->now();
@@ -141,76 +139,81 @@ int64_t UWBController::get_time_ms()
 
 void UWBController::performTask()
 {
-    // 实现节点的任务逻辑
-    sleep(1);
-    uwb_interfaces::msg::UWBData msg;
-    // msg.label_name = labelName;
-    for (int i = 0; i < anchorList.size(); i++)
-    {
-        int64_t anchor_id = anchorList[i]; // anchor id
-
-        uwb_interfaces::msg::UWBDistance distance;
-        distance.src = id;
-        distance.dest = anchor_id;
-        distance.distance = callServiceMeasureDistance(anchor_id);
-        msg.distances.push_back(distance);
-    }
-    locatePublisher_->publish(msg);
-
-    RCLCPP_INFO(this->get_logger(), "Node %s has completed its task.", nodeName.c_str());
+    callServiceMeasureDistance(0);
 }
 
-int64_t UWBController::callServiceMeasureDistance(int anchorId)
+double UWBController::callServiceMeasureDistance(int index)
 {
-    int64_t distance = 0;
+    int src = id;
+    int dest = anchorList[index];
+
     auto request = std::make_shared<uwb_interfaces::srv::UWBMeasure::Request>();
-    request->cmd = 1;
-    request->src = 2;
-    request->dest = anchorId;
+    request->src_address = src;
+    request->dest_address = dest;
 
-    service_call_completed = false;
-
+    RCLCPP_INFO(this->get_logger(), "Node %s is calling service. src: %d, dest: %d", nodeName.c_str(), src, dest);
+    while (!client_->wait_for_service(1s))
+    {
+        if (!rclcpp::ok())
+        {
+            RCLCPP_ERROR(this->get_logger(), "Interrupted while waiting for the service. Exiting.");
+            return 0;
+        }
+        RCLCPP_INFO(this->get_logger(), "service not available, waiting again...");
+    }
     auto future = client_->async_send_request(request, std::bind(&UWBController::handle_response, this, std::placeholders::_1));
 
-    int timeout = 0;
-    while (!this->service_call_completed)
-    {
-        if (timeout++ >= 30)
-        {
-            break;
-        }
-        usleep(1000);
-    }
-    if (timeout >= 1000)
-    {
-        RCLCPP_ERROR(this->get_logger(), "no response, timeout.");
-    }
-    else
-    {
-        distance = this->measureDistance;
-    }
-
-    return distance;
+    return 0.0;
 }
+
 void UWBController::handle_response(rclcpp::Client<uwb_interfaces::srv::UWBMeasure>::SharedFuture future)
 {
     auto response = future.get();
-    // 在这里处理响应
-    // 例如，打印响应消息
-    this->measureDistance = response->distance;
-    this->service_call_completed = true;
+
+    uwb_interfaces::msg::UWBDistance uwb_distance;
+    uwb_distance = response->uwb_distance;
+
+    RCLCPP_INFO(this->get_logger(), "dest: %ld, distance: %lf", uwb_distance.dest, uwb_distance.distance);
+    uwb_data.distances.push_back(uwb_distance);
+
+    int anchor_id = uwb_distance.dest;
+    
+    int index = -1;
+
+    for (int i = 0; i < anchorList.size(); i++)
+    {
+        if (anchorList[i] == anchor_id)
+        {
+            index = i;
+            break;
+        }
+    }
+
+    RCLCPP_INFO(this->get_logger(), "index: %d", index);
+    if (index == anchorList.size() - 1)
+    {
+        locatePublisher_->publish(uwb_data);
+        RCLCPP_INFO(this->get_logger(), "Node %s has completed its task.", nodeName.c_str());
+        controllerPublisher_->publish(control_message);
+        uwb_data.distances.clear();
+    }
+    else
+    {
+        callServiceMeasureDistance(index + 1);
+    }
 }
 
 std::string UWBController::selectNextNode()
 {
-    // 选择下一个节点
     for (int i = 0; i < controllerNodesList.size(); i++)
     {
         if (std::find(completedNodes.begin(), completedNodes.end(), controllerNodesList[i]) == completedNodes.end())
         {
+            RCLCPP_INFO(this->get_logger(), "Next node is %s", controllerNodesList[i].c_str());
             return controllerNodesList[i];
         }
     }
     completedNodes.clear();
+
     return controllerNodesList[0];
 }
