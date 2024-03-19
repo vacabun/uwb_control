@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(uwb_interfaces REQUIRED)
 find_package(std_msgs REQUIRED)
+
 add_executable(controller_with_anchor
     src/controller_with_anchor.cpp
 )
@@ -17,7 +18,15 @@ target_include_directories(controller_with_anchor PUBLIC include/)
 ament_target_dependencies(controller_with_anchor rclcpp std_msgs uwb_interfaces)
 
 install(TARGETS controller_with_anchor DESTINATION lib/${PROJECT_NAME})
+
+add_executable(controller
+    src/controller.cpp
+)
+target_include_directories(controller PUBLIC include/)
+ament_target_dependencies(controller rclcpp std_msgs uwb_interfaces)
+install(TARGETS controller DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -29,6 +38,5 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
-
 
 ament_package()

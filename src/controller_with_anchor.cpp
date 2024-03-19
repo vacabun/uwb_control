@@ -24,18 +24,15 @@ UWBController::UWBController() : Node("uwb_controller")
     RCLCPP_INFO(this->get_logger(), "Node %s has been started.", this->get_name());
     config();
 
-    rclcpp::SensorDataQoS qos;
-    qos.keep_last(1);
-
     client_ = this->create_client<uwb_interfaces::srv::UWBMeasure>(brigde_service_str);
-    controllerPublisher_ = this->create_publisher<uwb_interfaces::msg::UWBControl>("uwb_control_topic", qos);
-    controllerSubscription_ = this->create_subscription<uwb_interfaces::msg::UWBControl>("uwb_control_topic", qos, std::bind(&UWBController::control_callback, this, std::placeholders::_1));
+    controllerPublisher_ = this->create_publisher<uwb_interfaces::msg::UWBControl>("uwb_control_topic", 10);
+    controllerSubscription_ = this->create_subscription<uwb_interfaces::msg::UWBControl>("uwb_control_topic", 10, std::bind(&UWBController::control_callback, this, std::placeholders::_1));
 
     liveTimer_ = this->create_wall_timer(1s, std::bind(&UWBController::liveTimerCallback, this));
-    livePublisher_ = this->create_publisher<std_msgs::msg::String>("uwb_control_live_topic", qos);
-    liveSubscription_ = this->create_subscription<std_msgs::msg::String>("uwb_control_live_topic", qos, std::bind(&UWBController::live_callback, this, std::placeholders::_1));
+    livePublisher_ = this->create_publisher<std_msgs::msg::String>("uwb_control_live_topic", 10);
+    liveSubscription_ = this->create_subscription<std_msgs::msg::String>("uwb_control_live_topic", 10, std::bind(&UWBController::live_callback, this, std::placeholders::_1));
 
-    locatePublisher_ = this->create_publisher<uwb_interfaces::msg::UWBData>(locatePublishTopic, qos);
+    locatePublisher_ = this->create_publisher<uwb_interfaces::msg::UWBData>(locatePublishTopic, 10);
 
     controllerNodesList.push_back(nodeName);
 
